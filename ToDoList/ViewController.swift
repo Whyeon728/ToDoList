@@ -11,15 +11,41 @@ class ViewController: UIViewController {
 
     @IBOutlet weak var tableView: UITableView!
     
-    var tasks = [Task]()
+    @IBOutlet var editButton: UIBarButtonItem!
+    
+    var doneButton: UIBarButtonItem?
+    
+    var tasks = [Task]() {
+        didSet { // tasks에 할일이 추가될때마다 유저디폴츠에 저장이됨.
+            self.saveTasks()
+        }
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Do any additional setup after loading the view.
+ 
+        //MARK: - 바 버튼 객체 생성(Done)
+        self.doneButton = UIBarButtonItem(barButtonSystemItem: .done, target: self,
+                                          action: #selector(doneButtonTap))
+        self.doneButton?.style = .plain
         self.tableView.dataSource = self
+        
+        self.tableView.delegate = self
+        self.loadTasks()
+    }
+    
+    // edit 버튼 누르면 Done 버튼으로 바뀌는데 바뀐 Done버튼의 기능
+    @objc func doneButtonTap() {
+        self.navigationItem.leftBarButtonItem = self.editButton // Done 버튼 누르면 다시 edit 버튼으로 바뀜.
+        self.tableView.setEditing(false, animated: false) // 편집모드 빠져나오기
     }
 
     @IBAction func tabEditButton(_ sender: UIBarButtonItem) {
+        
+        guard !self.tasks.isEmpty else { return } // 테이블이 비어있지 않을때 밑에 코드 수행
+        // edit 버튼 누르면 Done 버튼으로 바뀜.
+        self.navigationItem.leftBarButtonItem = self.doneButton
+        self.tableView.setEditing(true, animated: true) // 왼쪽에 에딧모양 - 아이콘이 생김.
         
     }
     
@@ -56,6 +82,31 @@ class ViewController: UIViewController {
         //add 버튼 누를시 알림창 발생
         self.present(alert, animated: true, completion: nil) // completion : 프레젠테이션이 끝나고 실행할 블록
     }
+
+    //MARK: - 유저디폴츠 싱글톤 패턴
+    //앱에 단 하나만 존재함. 앱종료에도 데이터 살아있게함.
+    func saveTasks() {
+        let data = self.tasks.map { //tasks 배열을 딕셔너리로 맵핑
+            [
+                "title":  $0.title,
+                "done": $0.done
+            ]
+        }
+        let userDefaults = UserDefaults.standard // 유저디폴츠 인스턴스를 가져옴
+        userDefaults.set(data, forKey: "tasks") // 데이터를 세팅해주고 해당 데이터를 "tasks" 라고 부르겠음
+    }
+    
+    func loadTasks() {
+        let userDefaults = UserDefaults.standard // 유저디폴츠 인스턴스를 가져옴
+        
+        // "tasks" 라는 데이터를 불러오고 딕셔너리 형태로 타입 캐스팅한다. 다시 구조체형태로 리턴해준다.
+        guard let data = userDefaults.object(forKey: "tasks") as? [[String: Any]] else {return}
+        self.tasks = data.compactMap {
+            guard let title = $0["title"] as? String else { return nil}
+            guard let done = $0["done"] as? Bool else { return nil }
+            return Task(title: title, done: done)
+        }
+    }
 }
 
 //MARK: - 테이블뷰 데이터 소스에 들어갈 내용
@@ -78,8 +129,50 @@ extension ViewController: UITableViewDataSource {
                                              //  numberOfRowsInSection 에서 정의; row 값은 tasks 배열의 개수 만큼 늘어남.
         
         cell.textLabel?.text = task.title
+        
+        // 체크 표시 활성화
+        if task.done {
+            cell.accessoryType = .checkmark
+        } else {
+            cell.accessoryType = .none
+        }
+        
         return cell
         // 작성후 등록 버튼에서 다시 리로드 되도록 코드작성.
     }
+    
+    //MARK: - 편집모드에서 동작정의
+    
+    // 편집모드에서 삭제버튼이 눌려진 셀이 어떤 셀인지 알려주는 메소드
+    func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
+        self.tasks.remove(at: indexPath.row) // 배열에 할일이 삭제되도록함.
+        tableView.deleteRows(at: [indexPath], with: .automatic) // 테이블뷰도 행이 삭제되도록함. 스와이프삭제가능
+        
+        if self.tasks.isEmpty { //배열이 모두 비어있으면 done 버튼 빠져나오기
+            self.doneButtonTap()
+        }
+    }
+    
+    // 편집모드에서 행을 이동시킬수 있음; 함수만 추가해도 재정렬 아이콘 생성되고 움직일수 있음.
+    func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
+        
+        //실데이터 배열도 재정렬되도록 해줌.
+        var tasks = self.tasks // 실데이터를 건드리지 않도록 따로 저장
+        let task = tasks[sourceIndexPath.row] // 임시로 지금 잡고있는 셀을 복사
+        tasks.remove(at: sourceIndexPath.row) // 원래 배열에서 삭제
+        tasks.insert(task, at: destinationIndexPath.row) // 이동한 위치로 insert 시켜줌
+        self.tasks = tasks // 재정렬 된 값을 저장
+    }
+
 }
 
+extension ViewController: UITableViewDelegate { //셀의 액션처리, 섹션 헤더뷰, 푸터뷰 관리; 삭제 편집등 기능제공
+    
+    // 셀을 선택했을때 어떤 셀을 선택했는지 알려줌
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        var task = self.tasks[indexPath.row] // 배열의 요소에 접근. 첫번째 셀 선택시 indexPath.row 값은 0이됨.
+        task.done = !task.done // true 일시 false로 false시 true로 변경시켜줌
+        self.tasks[indexPath.row] = task // 실제 데이터에 값을 변경해줌
+        self.tableView.reloadRows(at: [indexPath], with: .automatic) // 선택된 셀만 테이블뷰에 리로드 애니메이션 시스템자동.
+    }
+}
